@@ -1,0 +1,146 @@
+---
+title: "TO404 Homework Assignment 1"
+author: "Richard Einhorn"
+date: "Assigned: Oct 24, 2020, Due Sun Nov 01, 2020 11:59PM"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Setup
+
+```{r, message=F, error=F}
+#install.packages("nycflights13")
+library(nycflights13)  # import data
+library(ggplot2)  # used in visualizations
+library(dplyr)  # used in data frame manipulations
+nyc <- nycflights13::flights  # assign data to nyc data frame
+```
+
+Let's take a look at the data:
+```{r}
+head(nyc)
+```
+
+
+# Basic Exploration
+
+Let’s first do some simple exploration of this data.
+
+## How many airlines are there?
+```{r}
+length(table(na.omit(nyc$carrier)))
+```
+There are 16 airlines in total.
+
+## How many flights there were by the airline with code OO?
+```{r}
+nrow(na.omit(nyc[nyc$carrier == "OO",]))
+```
+There were a total of 29 flights by the airline with code OO. 
+
+## How long is the shortest flight out of any NYC airport??
+```{r}
+min(nyc$air_time, na.rm = TRUE)
+```
+The shortest flight recorded took 20 minutes.
+
+## How many flights were there by United Airlines on Jan 12th 2013?
+```{r}
+nrow(na.omit(nyc[nyc$carrier == "UA" & nyc$month == '1' & nyc$day == '12',]))
+```
+There were 110 flights by UA on Jan 12th 2013.
+
+# Arrival Delay
+
+Lets focus on Arrival Delay.
+
+## What was the average arrival delay?
+```{r}
+mean(na.omit(nyc[nyc$month == '1',]$arr_delay))
+```
+The average arrival delay for all airports and all airlines combined in Jan 2013 was equal to about 6 minutes.
+
+## What was the median arrival delay?
+```{r}
+median(na.omit(nyc[nyc$month == '1',]$arr_delay))
+```
+The median arrival delay for all airports and all airlines combined in Jan 2013 was equal to about -3 minutes, meaning that exactly 50% of flights arrived at least 3 minutes early.
+
+> We see that the average flight delay was around 6 minutes indicating that, overall, flights from NYC airports were efficient (assuming that passengers do not seriously mind a delay of a few minutes). The difference between the mean and the median suggests that the data is skewed (to the right), meaning that there is a few flights which are massively delayed hence have a large impact on the mean. It could be argued that passengers are probably more interested in the median flight arrival delay as most flights (i.e. more than 50%) do not have any arrival delay (in fact, the majority of flights in the dataset arrive early).
+
+# Airline Performance
+
+Lets see if all airlines are equally terrible as far as flight arrival delays are concerned.
+
+## What is the average arrival delay by airline?
+```{r}
+nyc$carrier <- as.factor(nyc$carrier) # ensuring that airline column in data set
+# is coded as a factor
+
+carrier_delay = tapply(nyc$arr_delay, nyc$carrier, mean, na.rm = TRUE)
+knitr::kable(carrier_delay, col.names="Average arrival delay (in minutes)", digits = 2)
+```
+
+```{r, echo=F}
+colour <- ifelse(carrier_delay < 0, 'green', 'red')
+barplot(carrier_delay, xlab = 'Airline Code', ylab = 'Average arrival delay (in minutes)', main = 'Comparison of Average Arrival Delay by Airline', col = colour)
+
+```
+
+We can see that only two airlines (AS and HA) do not, on average, arrive with a delay. If we are looking for the airline with the least divergence from the expected arrival time, we find that AA performs best with a minimum absolute average arrival delay of .36 minutes.
+
+## Which airline has the highest average arrival delay? Which airline has the smallest average arrival delay? Are there any airlines that have a negative average arrival delay?
+
+We find that `{r} which.max(carrier_delay)` has the highest average arrival delay (equal to approx. 22 minutes). If we consider airlines that actually have a negative average arrival delay (i.e. whose flights usually arrive before the scheduled time), we find that `{r} which.min(carrier_delay)` has the smallest average arrival delay (equal to approx. -10 minutes). From those airlines that, on average, arrive delayed, `{r} which.min(carrier_delay[carrier_delay>0])` has the smallest average arrival delay.
+
+Finally, as discussed above, two airlines have negative average arrival delays: `{r} which(carrier_delay < 0)`.
+
+# Air Gain
+
+Let's find out whether airlines actually make up time when on air.
+
+## Explore airgain data
+
+### Summary statistics
+```{r}
+nyc$air_gain = nyc$dep_delay - nyc$arr_delay
+summary(nyc$air_gain)
+
+hist(nyc$air_gain, 100, probability = TRUE, main = "Distribution of air gain", xlab = "Air Gain")
+```
+
+### Air Gain by Airline
+```{r, warning=F}
+ggplot(data = nyc, aes(x = carrier, y = air_gain)) +
+  geom_jitter(alpha = 0.4) +
+  labs(
+    title = "Air Gain distribution by Airline",
+    x = "Airline",
+    y = "Air Gain"
+  )
+```
+
+## Questions regarding air gain data
+
+### Do airlines actually gain any time when in air on average?
+```{r}
+mean(na.omit(nyc$air_gain))
+```
+Airlines, on average, do gain time while in the air (approx. 6 minutes in the mean).
+
+### Which airlines do a better job, which do a worse job?
+```{r}
+sort(tapply(nyc$air_gain, nyc$carrier, mean, na.rm = TRUE))
+```
+The above table shows how airlines perform on air gain (sorted from worst to best). Note that a negative value means that the airline's flights, on average, increase the delay while in the air (airlines F9 and FL). This is visualized in the below bar plot:
+
+```{r}
+barplot(sort(tapply(nyc$air_gain, nyc$carrier, mean, na.rm = TRUE)), main="Average air gain by airline", xlab="Airline Code", ylab = "Average Air Gain (in minutes)")
+```
