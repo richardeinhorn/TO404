@@ -1,0 +1,239 @@
+---
+title: "TO404 Homework Assignment 2"
+author: "Richard Einhorn"
+date: "Due Sun Nov 08, 2020 11:59PM"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Setup
+
+## Import Libraries
+```{r}
+library(dplyr)
+library(ggplot2)
+```
+
+
+## Create Dataset
+```{r}
+filenames <- list.files("data", pattern="*.csv")
+base_data <- read.csv('data/201901-citibike-tripdata.csv')
+
+new_data <- read.csv('data/201902-citibike-tripdata.csv')
+base_data <- rbind(base_data, read.csv('data/201902-citibike-tripdata.csv'))
+
+for (file in filenames[2:12]) {
+  file_path = paste("data/", file, sep='')
+  base_data <- rbind(base_data, read.csv(file_path))
+}
+```
+
+# SMALL DATASET FOR DEVELOPING VISUALS
+```{r}
+n = 100000
+test_id <- sample(1:nrow(base_data), n) 
+base_data <- base_data[test_id,]
+```
+
+
+## Clean and Prepare Dataset
+```{r}
+# column-wise summary of dataset
+summary(base_data)
+
+# change tripduration units to minutes
+base_data <- base_data %>%
+  mutate(tripduration = tripduration/60)
+
+# converting starttime and stoptime to datetime values
+timezone = "America/New_York"
+
+ptm <- proc.time()
+base_data$starttime <- as.POSIXct(base_data$starttime, tz = timezone)
+base_data$stoptime <- as.POSIXct(base_data$stoptime, tz = timezone)
+proc.time() - ptm
+
+
+ptm <- proc.time()
+base_data <- base_data %>%
+  mutate(
+    starttime = fast_strptime(starttime, tz=timezone),
+    stoptime = fast_strptime(stoptime, tz=timezone)
+    )
+proc.time() - ptm
+```
+
+
+# Understand the Data: Exploratory Data Analysis and Visualisation
+
+## Understanding City Bike Users
+### Users: User Type
+```{r}
+# user type (24h/3d pass vs annual subscriber)
+user.types <- unique(base_data$usertype)
+base_data$usertype <- as.factor(base_data$usertype)  # convert to 2-level factor
+user.shares <- prop.table(table(base_data$usertype))
+
+pie(user.shares, labels = c("Subscribers", "Customers"), main = "Shares of different user groups")
+
+```
+
+### Users: User Gender
+```{r}
+# gender
+base_data <- base_data %>%
+  mutate(gender = ifelse(gender == 0, "unknown", ifelse(gender == 1, "male", "female")))
+base_data$gender <- as.factor(base_data$gender)  # convert to 3-level factor
+prop.table(table(base_data$gender))
+
+g <- ggplot(data = base_data, aes(x = gender)) +
+  geom_bar() +
+  labs(
+    title = "Users' gender",
+    subtitle = "Men much more likely to use service than women"
+  )
+print(g)
+```
+
+*Comment:* It is surprising that a vast majority of users are male: men made approx. 14.5 million of the total 20.5 million annual rides recorded in the system.
+
+### Users: User Age
+```{r}
+# birth year
+hist(base_data$birth.year, main = "Users' birth years", xlab = "Birth Year", ylab = "Frequency")
+```
+
+*Comment:* We note that there is a few errors in the birth year column of the data set - some user accounts have a birth year of 1857-1900, probably because they made a typo when signing up. This error could be avoided if the signup form would check birth years and give an error if user enter a data before 1900.
+
+## Understanding City Bike Infrastructure
+
+### Bikes
+```{r}
+# bikeid
+bikes <- unique(base_data$bikeid)
+```
+
+### Stations
+```{r}
+# stations
+start.stations <- unique(base_data$start.station.id)
+end.stations <- unique(base_data$end.station.id)
+```
+
+*Comment:* The system has approx. 19,500 bikes with unique ids that circulate between approx. 950 stations. What is interesting to note about the station infrastructure is that some stations are only used as end stations.
+
+## Understanding City Bike Trips
+
+### Trip Duration
+```{r}
+# trip duration (in sec)
+g <- ggplot(base_data, aes(x=tripduration)) +
+  geom_histogram() +
+  labs(
+    title = "City Bike Trip Duration",
+    xlab = "Trip Duration in Minutes"
+  )
+print(g)
+```
+
+# Identify Patterns in the Ride History Data
+
+## Which months are busiest?
+```{r}
+# Circular barplot showing no. trips per month with seasons separated
+month_data <- base_data %>%
+  mutate(month = format(starttime, "%m")) %>%
+  group_by(month) %>%
+  summarise(
+    n = n(),
+    avg.length = mean(tripduration)
+  ) %>%
+  mutate(
+    group = c(rep('Winter', 2), rep('Spring', 3), rep('Summer', 3), rep('Fall', 3), 'Winter')
+  )
+
+# build chart
+margin <- 3
+to_add <- data.frame(matrix(NA, margin*nlevels(month_data$group), ncol(month_data)))
+colnames(to_add) <- colnames(data)
+to_add$group <- rep(levels(month_data), each=margin)
+month_data <- rbind(month_data, to_add)
+month_data <- month_data %>% arrange(group)
+month_data$id <- seq(1, nrow(month_data))
+
+label_data <- month_data
+number_of_bar <- nrow(label_data)
+angle <- 90 - 360 * (label_data$id-0.5) / number_of_bar
+label_data$hjust <- ifelse( angle < -90, 1, 0)
+label_data$angle <- ifelse(angle < -90, angle+180, angle)
+
+month_base_data <- month_data %>% 
+  group_by(group) %>% 
+  summarize(start=min(id), end=max(id) - margin) %>% 
+  rowwise() %>% 
+  mutate(title=mean(c(start, end)))
+
+month_grid_data <- month_base_data
+month_grid_data$end <- month_grid_data$end[ c( nrow(month_grid_data), 1:nrow(month_grid_data)-1)] + 1
+month_grid_data$start <- month_grid_data$start - 1
+month_grid_data <- month_grid_data[-1,]
+
+# Make the plot
+p <- ggplot(month_data, aes(x=as.factor(id), y=value, fill=group)) +
+  geom_bar(aes(x=as.factor(id), y=value, fill=group), stat="identity", alpha=0.5) +
+  
+  # Add a val=100/75/50/25 lines. I do it at the beginning to make sur barplots are OVER it.
+  geom_segment(month_data=month_grid_data, aes(x = end, y = 80, xend = start, yend = 80), colour = "grey", alpha=1, size=0.3 , inherit.aes = FALSE ) +
+  geom_segment(month_data=month_grid_data, aes(x = end, y = 60, xend = start, yend = 60), colour = "grey", alpha=1, size=0.3 , inherit.aes = FALSE ) +
+  geom_segment(month_data=month_grid_data, aes(x = end, y = 40, xend = start, yend = 40), colour = "grey", alpha=1, size=0.3 , inherit.aes = FALSE ) +
+  geom_segment(month_data=month_grid_data, aes(x = end, y = 20, xend = start, yend = 20), colour = "grey", alpha=1, size=0.3 , inherit.aes = FALSE ) +
+  
+  # Add text showing the value of each 100/75/50/25 lines
+  annotate("text", x = rep(max(month_data$id),4), y = c(20, 40, 60, 80), label = c("20", "40", "60", "80") , color="grey", size=3 , angle=0, fontface="bold", hjust=1) +
+  
+  geom_bar(aes(x=as.factor(id), y=value, fill=group), stat="identity", alpha=0.5) +
+  ylim(-100,120) +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    axis.text = element_blank(),
+    axis.title = element_blank(),
+    panel.grid = element_blank(),
+    plot.margin = unit(rep(-1,4), "cm") 
+  ) +
+  coord_polar() + 
+  geom_text(data=label_data, aes(x=id, y=value+10, label=individual, hjust=hjust), color="black", fontface="bold",alpha=0.6, size=2.5, angle= label_data$angle, inherit.aes = FALSE ) +
+  
+  # Add base line information
+  geom_segment(data=month_base_data, aes(x = start, y = -5, xend = end, yend = -5), colour = "black", alpha=0.8, size=0.6 , inherit.aes = FALSE )  +
+  geom_text(data=month_base_data, aes(x = title, y = -18, label=group), hjust=c(1,1,0,0), colour = "black", alpha=0.8, size=4, fontface="bold", inherit.aes = FALSE)
+ 
+p
+
+#g <- ggplot(month_data, aes(x=))
+
+```
+
+
+## Which weekdays are busiest?
+```{r}
+# graph showing no. trips per day (Monday-Sunday); use colors to denote trip length (group in 5 categories)
+```
+
+
+## What daytime is busiest?
+
+## Changes in Ridership Patterns
+```{r}
+# graph showing no. trips per hour; use colors to denote user gender
+```
+
+## XX
