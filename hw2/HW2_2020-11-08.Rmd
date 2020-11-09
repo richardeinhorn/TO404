@@ -16,18 +16,15 @@ knitr::opts_chunk$set(echo = TRUE)
 # Setup
 
 ## Import Libraries
-```{r}
+```{r, include=FALSE}
 library(tidyverse)
+library(lubridate)
 ```
-
 
 ## Create Dataset
 ```{r}
 filenames <- list.files("data", pattern="*.csv")
 base_data <- read.csv('data/201901-citibike-tripdata.csv')
-
-new_data <- read.csv('data/201902-citibike-tripdata.csv')
-base_data <- rbind(base_data, read.csv('data/201902-citibike-tripdata.csv'))
 
 for (file in filenames[2:12]) {
   file_path = paste("data/", file, sep='')
@@ -44,6 +41,7 @@ base_data <- base_data[test_id,]
 write.csv(base_data, "subset.csv")
 ```
 
+We will do the analysis with a subset of our data consisting of approx. 1.07 million data points (or 5%) randomly chosen from the 2019 data.
 
 ## Clean and Prepare Dataset
 ```{r}
@@ -189,7 +187,7 @@ g <- ggplot(month_data, aes(x=as.factor(id), y=n, fill=group)) +
 g
 ```
 
-The above graph allows us to understand bikesharing seasonality. Most trips occur between April and October, with the summer months (blue) generally most attractive to Citibike cyclists. This seasonality is most likely explained by weather and tourist influx. There is an interesting spike in trips in February - further analysis would need to be done to see what boosted bike usage. Potentially effects include a warm weather episode or an increase in tourists due to the holidays around February.
+The above graph allows us to understand bikesharing seasonality. Most trips occur between April and October, with the summer months (blue) generally most attractive to Citibike cyclists. This seasonality is most likely explained by weather and tourist influx. The magnitude of the volatility is significant and provides opportunities for further analysis to predict upper and lower bounds of demand for better capacity planning in any given time of the year.
 
 We can also see that average trip duration changes throughout the year. They generally correlate with the total number of rides - both are probably affected by weather - yet the spike in demand in February is not echoed in longer trips during that month.
 
@@ -205,7 +203,7 @@ weekday_data <- clean_data %>%
   ) %>%
   mutate(type = ifelse((weekday == "Saturday" | weekday == "Sunday"), "Weekend", "Weekday"))
 
-g <- ggplot(weekday_datas, aes(x = weekday, y = n, fill = type)) +
+g <- ggplot(weekday_data, aes(x = weekday, y = n, fill = type)) +
   geom_bar(stat="identity") +
   labs(
     title = "Trips by Day of the Week and Average Length",
