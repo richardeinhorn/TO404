@@ -1,0 +1,12 @@
+name: FirstApp
+title: FirstApp
+username:
+account: einhorn
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 3313658
+bundleId: 3914541
+url: https://einhorn.shinyapps.io/FirstApp/
+when: 1606527214.04593
+asMultiple: FALSE
+asStatic: FALSE

@@ -1,0 +1,271 @@
+---
+title: "TO404 Homework Assignment 3"
+author: "Richard Einhorn"
+date: "Due Sun Nov 29, 2020 11:59PM"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction to RShiny
+
+Tutorial from Dean Attali: https://deanattali.com/blog/building-shiny-apps-tutorial/
+
+## Step 1
+
+Import libraries
+```{r}
+library(shiny)
+```
+
+Run demo app
+```{r}
+runExample("01_hello")
+```
+## Step 3
+
+Create empty app (in separate app.R file)
+```{r}
+ui <- fluidPage()
+server <- function(input, output) {}
+shinyApp(ui=ui, server=server)
+```
+
+
+## Step 3
+
+
+## Create subset for analysis and visualization
+```{r}
+set.seed(1234)
+n = trunc(0.05 * nrow(base_data))
+test_id <- sample(1:nrow(base_data), n) 
+base_data <- base_data[test_id,]
+write.csv(base_data, "subset.csv")
+```
+
+We will do the analysis with a subset of our data consisting of approx. 1.07 million data points (or 5%) randomly chosen from the 2019 data.
+
+## Clean and Prepare Dataset
+```{r}
+# column-wise summary of dataset and summary statistics
+summary(base_data)
+
+# check for NAs
+sapply(base_data, function(x) sum(is.na(x)))
+
+# change tripduration units to minutes
+base_data <- base_data %>%
+  mutate(tripduration = tripduration/60)
+
+# converting starttime and stoptime to datetime values (function processing time monitored for reference)
+timezone = "America/New_York"
+ptm <- proc.time()
+base_data <- base_data %>%
+  mutate(
+    starttime = fast_strptime(starttime, format = "%Y-%m-%d %H:%M:%OS", tz=timezone),
+    stoptime = fast_strptime(stoptime, format = "%Y-%m-%d %H:%M:%OS", tz=timezone)
+    )
+proc.time() - ptm
+
+clean_data <- base_data
+```
+
+We see that the data is of high quality - there is almost no missing data, the data in the columns have a consistent format and only a few tweaks are necessary to prepare the data set for further analysis and visualization.
+
+# Understand the Data: Exploratory Data Analysis and Visualisation
+
+## Understanding City Bike Users
+### Users: User Type
+```{r}
+# user type (24h/3d pass vs annual subscriber)
+user.types <- unique(clean_data$usertype)
+clean_data$usertype <- as.factor(clean_data$usertype)  # convert to 2-level factor
+user.shares <- prop.table(table(clean_data$usertype))
+
+pie(user.shares, labels = c("Customers", "Subscribers"), main = "User groups: Most users subscribe to service")
+
+```
+
+*Comment:* Most users buy annual memberships for Citibikes instead of 24-hour or 3-day passes. This is surprising because one could have assumed that the bicycle sharing offer would be most relevant for occasional cyclists or tourists who do not want to purchase a bike for themselves. Instead, it seems that many New Yorkers use the bikes on a regular basis so that it makes sense for them to purchase annual memberships.
+
+### Users: User Gender
+```{r}
+# gender
+clean_data <- clean_data %>%
+  mutate(gender = ifelse(gender == 0, "unknown", ifelse(gender == 1, "male", "female")))
+clean_data$gender <- as.factor(clean_data$gender)  # convert to 3-level factor
+users.gender <- prop.table(table(clean_data$gender))
+
+pie(users.gender, labels = c("Women", "Men", "Unknown"), main = "Users' Genders: Most users male")
+```
+
+*Comment:* It is surprising that a vast majority of users are male: men made approx. 14.5 million of the total 20.5 million annual rides recorded in the system.
+
+### Users: User Age
+```{r}
+# birth year
+hist(clean_data$birth.year, main = "Users' birth years: Most users aged 15-75", xlab = "Year of Birth", ylab = "Frequency")
+```
+
+*Comment:* We note that there is a few errors in the birth year column of the data set - some user accounts specify birth years between 1850-1900, probably because users made a typo when signing up. This error could be avoided if the signup form checked birth years and gave an error if user enter a data before 1900.
+
+Apart from the errors, we see that most riders are 15-75 years old with an interesting bump in the number of users aged 40-50.
+
+## Understanding City Bike Infrastructure
+
+### Bikes
+```{r}
+# bikeid
+bikes <- unique(clean_data$bikeid)
+paste("Bike count:", length(bikes))
+```
+
+### Stations
+```{r}
+# stations
+start.stations <- unique(clean_data$start.station.id)
+end.stations <- unique(clean_data$end.station.id)
+paste("Delta in end.stations vs start.stations:", length(end.stations) - length(start.stations))
+```
+
+*Comment:* The system has approx. 19,500 bikes with unique ids that circulate between approx. 950 stations. What is interesting to note about the station infrastructure is that there are more end stations than start stations - either some stations are only used as end stations, or stations have been closed, or there is some error in the data.
+
+## Understanding City Bike Trips
+
+### Trip Duration
+```{r}
+# trip duration (in sec)
+hist(clean_data[clean_data$tripduration<150,]$tripduration, main = "Trip duration: Mostly short rides up to 25min", xlab = "Trip duration (in min)")
+```
+
+*Comment:* The tripduration pattern is positively skewed with some significant outliers (according to the data, some trips have taken up to approx. 41,000 minutes or 28.5 days). Most trips take just a few minutes with few rides taking longer than 40 minutes.
+
+# Identify Patterns in the Ride History Data
+
+## Which months are busiest?
+```{r}
+# Circular barplot showing no. trips per month with seasons separated
+month_data <- clean_data %>%
+  mutate(month = format(starttime, "%m")) %>%
+  group_by(month) %>%
+  summarise(
+    n = n(),
+    avg.length = mean(tripduration)
+  ) %>%
+  mutate(group = c(rep('Winter', 2), rep('Spring', 3), rep('Summer', 3), rep('Fall', 3), 'Winter'))
+
+# add full month names
+month_data <- month_data %>%
+  arrange(as.numeric(month)) %>%
+  mutate(month.str = paste(c("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"), " (", round(month_data$avg.length,1), "min)", sep = ""))
+
+# build chart
+margin <- 3
+to_add <- data.frame(matrix(NA, margin*nlevels(month_data$group), ncol(month_data)))
+colnames(to_add) <- colnames(data)
+month_data <- rbind(month_data, to_add)
+month_data$id <- seq(1, nrow(month_data))
+
+label_data <- month_data
+number_of_bar <- nrow(label_data)
+angle <- 90 - 360 * (label_data$id-0.5) / number_of_bar
+label_data$hjust <- ifelse( angle < -90, 1, 0)
+label_data$angle <- ifelse(angle < -90, angle+180, angle)
+
+g <- ggplot(month_data, aes(x=as.factor(id), y=n, fill=group)) +
+  geom_bar(stat="identity", alpha=0.5) +
+  ylim(-50000,180000) +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    axis.text = element_blank(),
+    axis.title = element_blank(),
+    panel.grid = element_blank(),
+    plot.margin = unit(rep(-1,4), "cm") 
+  ) +
+  coord_polar() + 
+  geom_text(data=label_data, aes(x=id, y=n+10, label=month.str, hjust=hjust), color="black", fontface="bold",alpha=0.6, size=2.5, angle= label_data$angle, inherit.aes = FALSE ) 
+ 
+g
+```
+
+The above graph allows us to understand bikesharing seasonality. Most trips occur between April and October, with the summer months (blue) generally most attractive to Citibike cyclists. This seasonality is most likely explained by weather and tourist influx. The magnitude of the volatility is significant and provides opportunities for further analysis to predict upper and lower bounds of demand for better capacity planning in any given time of the year.
+
+We can also see that average trip duration changes throughout the year. They generally correlate with the total number of rides - both are probably affected by weather - yet the spike in demand in February is not echoed in longer trips during that month.
+
+## Which weekdays are busiest?
+```{r}
+# prepare data and get weekdays from dates
+weekday_data <- clean_data %>%
+  mutate(weekday = factor(weekdays(as.Date(starttime)), levels = c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"))) %>%
+  group_by(weekday) %>%
+  summarise(
+    n = n(),
+    avg.length = mean(tripduration)
+  ) %>%
+  mutate(type = ifelse((weekday == "Saturday" | weekday == "Sunday"), "Weekend", "Weekday"))
+
+g <- ggplot(weekday_data, aes(x = weekday, y = n, fill = type)) +
+  geom_bar(stat="identity") +
+  labs(
+    title = "Trips by Day of the Week and Average Length",
+    subtitle = "Weekdays slightly busier, longer trips on weekend",
+    ylab = "Day",
+    xlab = "Number of Trips"
+  ) +
+  geom_text(aes(label=paste(round(avg.length,1), "min"), vjust = 0))
+
+g
+```
+
+We can see that usage of Citibikes is spread rather evenly across the week. There seem to be less trips on Mondays and over the weekend (especially on Sundays).
+
+What is interesting to note is that trips on the weekend take approx. 5min longer on average than those during the week, providing evidence that user behavior and ultimately the bikes' value proposition is different on weekends. 
+
+## What daytime is busiest?
+```{r}
+hour_data <- clean_data %>%
+  mutate(hour = format(starttime, "%H"), count = 1)
+
+g <- ggplot(hour_data, aes(fill=usertype, y=count, x=hour)) +
+  geom_bar(position="stack", stat="identity") +
+  labs(
+    title = "Usage by time of day",
+    subtitle = "Rush hour from 7-9am and 5-7pm",
+    xlab = "Time of day",
+    ylab = "Number of trips"
+  )
+g
+```
+
+We can see that most trips occur between approx. 6am and 9pm. There is clear evidence that Citibikes are being relied upon by commuters: usage spikes at the usual rush hours between 7-9am and 5-7pm.
+
+Short-term customers purchasing 24-hour or 3-day passes tend to use the bikes during the day, starting from around 10am. This means that heavy utilization rates in the evening rush hour are further increased by short-term customers. This could be a useful insight when considering bike capacities and designing day passes, for example offering discounted day passes valid only outside of rush hours.
+
+## When do different age groups use Citibikes?
+```{r}
+age_group_data <- clean_data %>%
+  mutate(
+    hour = format(starttime, "%H"),
+    count = 1,
+    age.group = ifelse(birth.year <= 1950, "Senior", ifelse(birth.year <= 1970, "50-70", ifelse(birth.year <= 1990, "30-50", ifelse(birth.year <= 2000, "20-30", "Teenagers")))))
+
+g <- ggplot(age_group_data, aes(fill=age.group, y=count, x=hour)) +
+  geom_bar(position="stack", stat="identity") +
+  labs(
+    title = "Usage by time of day and age group",
+    subtitle = "No age-specific usage patterns",
+    xlab = "Time of day",
+    ylab = "Number of trips"
+  )
+g
+```
+
+We can see that the share of users by age group does not vary throughout the different hours of the day (one could have expected, for example, that bike usage at night is predominantly accounted for by younger people but that is not supported by the evidence).
