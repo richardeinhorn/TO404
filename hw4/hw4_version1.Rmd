@@ -1,0 +1,193 @@
+---
+title: "HW4 Understanding NYC AirBnB Rental Dynamics"
+author: "Richard Einhorn"
+date: "due 08/12/2020"
+output:
+  html_document:
+    theme: lumen
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# load packages
+library(tidyverse)
+library(gender)
+library(tm)
+library(wordcloud)
+library(ggmap)
+```
+
+# Problem
+
+The objective of this work is to understand the dynamics that govern rental on AirBnB in New York City.
+The data set is composed of approx. 50k rows of data, each corresponding to one listing on the platform, and includes information on the property (e.g. room_type, price), its location (incl. neighborhood), the host (name) and user reviews.
+ 
+This report will investigate the available data looking for pricing patterns, investigating the role of gender and understand the effect of location on the success of a listing.
+
+# Data preparation
+```{r}
+# load data
+ab <- read.csv('AB_NYC_2019.csv')
+
+# new variables
+ab$id <- NULL
+ab$host_id <- NULL
+ab$reviews_per_month <- ifelse(is.na(ab$reviews_per_month) == T, 0, ab$reviews_per_month)
+
+# get gender
+uniqnames <- unique(ab$host_name)
+genders <- as.data.frame(gender(uniqnames))
+
+ab$host_gender <- with(genders, gender[match(ab$host_name, name)])
+ab$host_gender <- ifelse(is.na(ab$host_gender), "NA", ab$host_gender)
+```
+
+# Exploratory Analysis
+
+### Prices
+```{r}
+# average prices
+avg_prices <- ab %>% na.omit() %>% group_by(neighbourhood_group, room_type) %>% summarise(avg = mean(price), median = median(price), sd=sd(price))
+
+ggplot(avg_prices, aes(x = neighbourhood_group, y = avg, fill = room_type)) + geom_bar(stat = "identity", position = "dodge") + labs(title = "Average prices per night by neighbourhood/type", x = "Neighbourhood", y = "Avg. price")
+```
+
+As expected, we find that prices per night vary significantly with different neighbourhoods and room types (private rooms and entire homes/apartments being more expensive than shared rooms, respectively). Manhattan is by far the most expensive neighbourhood. Brooklyn, Queens and Staten Island exhibit approx. equal prices, travellers staying in an AirBnB in the Bronx pay least on average.
+
+```{r}
+# distribution of average prices
+avg_prices <- ab %>% na.omit() %>% group_by(neighbourhood_group) %>% summarise(avg = mean(price), sd=sd(price))
+
+ggplot(avg_prices, aes(x = neighbourhood_group, y = avg, ymin = max(avg - sd, 0) , ymax = avg + sd)) + geom_errorbar(width = 0.2) + geom_point(size=1.5) + labs(title = "Distribution of mean prices by neighbourhood", x = "Neighbourhood", y = "Mean price plus/minus standard deviation")
+```
+
+Not only the average price but also the distribution of prices varies across neighbourhoods. Manhatten and Staten Island exhibit the starkest price differences among their listings.
+
+### Reviews
+```{r}
+# reviews
+ab$review_category <- as.factor(ifelse(ab$number_of_reviews == 0, "zero", ifelse(ab$number_of_reviews > 3, "some", "many")))
+avg_prices_reviews <- ab %>% na.omit() %>% group_by(review_category) %>% summarise(avg = mean(price), median = median(price), sd= sd(price))
+
+ggplot(avg_prices_reviews, aes(x = review_category, y = avg)) + geom_bar(stat = "identity") + labs(title = "Average prices per night by no. reviews", x = "No. reviews", y = "Avg. price")
+```
+
+Interestingly, the average price per night does not seem to increase as a host gets more reviews (the reasoning behind this hypothesis would have been that - regardless whether a review is good or bad - the potential guest reduces the risk by booking an apartment that has many reviews and should be willing to pay for this risk reduction). To investigate whether this trend can actually be attributed to different review behavior by guests in correlation with neighbourhoods, we can check the below plot:
+
+```{r}
+avg_reviews <- ab %>% na.omit() %>% group_by(neighbourhood_group, room_type) %>% summarise(avg = mean(number_of_reviews))
+
+ggplot(avg_reviews, aes(x = neighbourhood_group, y = avg, col = room_type)) + geom_point(size=3) + labs(title = "Average no. reviews by neighbourhood/type", x = "Neighbourhood", y = "Avg. no. reviews")
+```
+
+Indeed, there is some evidence to suggest that review behaviour varies by neighbourhood with the more expensive listings generally receiving more reviews. Note that the trend that more exclusive room types get more reviews is reversed for Manhattan!
+
+### Gender
+```{r}
+# listings_count
+avg_prices_gender <- ab %>% na.omit() %>% group_by(neighbourhood_group, host_gender) %>% summarise(avg = mean(price))
+
+ggplot(avg_prices_gender, aes(x = neighbourhood_group, y = avg, fill = host_gender)) + geom_bar(stat = "identity", position = "dodge") + labs(title = "Average prices per night by neighbourhood/host gender", x = "Neighbourhood", y = "Avg. price")
+```
+
+The above barchart suggests that there is no particular correlation between the gender of a host and the prices they can command for renting their apartment on AirBnB.
+
+# Mapping
+```{r, message = F, warning = F}
+map <- get_map(location=c(left=min(ab$longitude), right=max(ab$longitude), 
+                          bottom=min(ab$latitude), top=max(ab$latitude)))
+
+# get data
+ab.graph <- ab %>% arrange(desc(price))
+ab.graph <- head(ab.graph, 100)
+
+ggmap(map) + geom_point(data=ab.graph, mapping=aes(longitude, latitude), 
+                        size = 0.1, col="red") + 
+  labs(title = "Mapping Top 100 AirBnBs in NYC", y="Latitude", x="Longitude")
+```
+
+We find that most of the top AirBnBs in NYC (as measured by price) are located in Lower Manhattan.
+
+```{r}
+ab.graph <- ab %>% arrange(desc(price))
+ggmap(map) + stat_density2d(data=ab.graph, mapping=aes(x=longitude, y=latitude, fill=..level..),
+                     geom="polygon", alpha=0.4) +
+  labs(title = "Heatmap of AirBnB property rental in NYC", y="Latitude", x="Longitude")
+```
+
+We further find that most AirBnB rental activity is concentrated close to the city center, with lower Manhatten and upper Brooklyn emerging as the neighbourhoods with the most AirBnB traffic.
+
+# AirBnB Listing Description
+
+## Description
+```{r, warning=F}
+set.seed(404)
+
+wordmap <- Corpus(VectorSource(ab$name))
+wordmap <- wordmap %>%
+  tm_map(removeNumbers) %>%
+  tm_map(removePunctuation) %>%
+  tm_map(stripWhitespace)
+wordmap <- tm_map(wordmap, content_transformer(tolower))
+wordmap <- tm_map(wordmap, removeWords, stopwords("english"))
+
+dtm <- TermDocumentMatrix(wordmap) 
+matrix <- as.matrix(dtm) 
+words <- sort(rowSums(matrix), decreasing=TRUE) 
+df <- data.frame(word = names(words), frequency=words)
+
+wordcloud(words = df$word, freq = df$frequency, min.freq = 1, max.words=200, random.order=FALSE, rot.per=0.35, colors=brewer.pal(8, "Dark2"))
+```
+
+There is a clear tendency to use certain keywords that have a positive connotation when naming one's place. Adjectives like "cozy", "spacious", "bright" and "modern" seem to be most common; rooms are often called "loft", "studio" or "home" to make the guest feel welcome. The prevalence of geographical markers (bushwick, williamsburg, park etc.) hints at the importance of the listing's location (see above).
+
+## Length of description
+```{r}
+ab$desc.length <- nchar(ab$name)
+avg.desc.length <- mean(ab$desc.length)
+sd.desc.length <- sd(ab$desc.length)
+ab$desc.length.cat <- ifelse(ab$desc.length <= avg.desc.length - sd.desc.length, "short", ifelse(ab$desc.length <= avg.desc.length + sd.desc.length, "regular", "long"))
+
+avg_prices_desc.length <- ab %>% group_by(neighbourhood_group, desc.length.cat) %>% summarise(avg = mean(price))
+
+ggplot(avg_prices_desc.length, aes(x = desc.length.cat, y = avg, fill = neighbourhood_group)) + geom_bar(stat = "identity", position = "dodge") + labs(title = "Average prices per night by neighbourhood/description length", x = "Length of description", y = "Avg. price")
+
+ggplot(ab, aes(x = desc.length, y = log(price), col = neighbourhood_group)) + geom_point(size = 0.1) + labs(title = "Prices per night vs. description length", x = "Length of description", y = "Log(Price)")
+```
+
+(Note: the above scatter plot uses a log scale due to the wide distribution of the data - some of the properties charge up to $10,000 a night.)
+
+The average price per night (bar chart) does not suggest a correlation between length of description and price per night. This initial finding is supported by the scatter plot: we can see that most properties have a description that has between 20 and 50 characters. We note that there is quite a distinct cutoff after 50 characters - properties that have longer descriptions tend to perform relatively poorly.
+
+# Reviews
+```{r}
+ab$date.review <- as.Date(ab$last_review)
+ab$month <- as.numeric(format(ab$date.review, "%m"))
+
+reviews.months <- ab %>% na.omit(month) %>% group_by(month) %>% summarise(n = n())
+
+ggplot(reviews.months, aes(x = as.factor(month), y = n)) + geom_bar(stat="identity") +
+  labs(main = "Seasonality of Reviews", x = "Month", y = "Total number of reviews")
+```
+
+Given that the data snapshot is taken in July (2019), it should not come as a surprise that most of the current reviews have been given in June, July and Mai, respectively. Still, the barchart gives at least some preliminary evidence that there is a significant seasonality to AirBnB travel in NYC - if a dataset detailing individual stays was available, one could further look into the factors that drive tourism and review-giving. 
+
+```{r}
+last.date <- as.Date(max(ab$date.review, na.rm=T))
+ab$time_since_review <- last.date - ab$date.review
+
+ab.time <- ab %>% na.omit(time_since_review) %>% select(c(time_since_review, price))
+
+ggplot(ab.time, aes(x = time_since_review, y = price)) + geom_point(size = 0.1) + labs(main = "Price vs days since last review", x = "Days since last review", y = "Price per night") + coord_cartesian(ylim = c(0, 3000))
+```
+(Note: the above graph has been shrunk so it only shows AirBnBs with prices per night smaller or equal to $3000)
+
+We find some evidence that those apartments that get more (positive?) reviews can command higher prices (or that more luxurious apartments get more reviews ...).
+
+# Conclusion
+
+Our analysis has shed light on a variety of factors that influence pricing and AirBnB traffic. For the typical host, most of the primary price drivers identified in this report (neighbourhood, distance to city center, room type) cannot be adjusted. However, we have also shown that descriptions can make a difference and that encouraging guests to leave a review will improve the value of the listing in the eyes of future guests.

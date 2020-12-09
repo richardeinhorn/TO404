@@ -1,0 +1,62 @@
+---
+title: "Hw4"
+author: "John McCarthy, Richard Einhorn, Natalie Vadasz, Eliza Brown, Analise Doorhy"
+date: "12/2/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+nyc <- read.csv("AB_NYC_2019.csv")
+str(nyc)
+nyc$id <- NULL
+
+nyc$neighbourhood_group <- as.factor(nyc$neighbourhood_group)
+nyc$neighbourhood <- as.factor(nyc$neighbourhood)
+nyc$room_type <- as.factor(nyc$room_type)
+nyc$last_review <- as.Date(nyc$last_review)
+summary(nyc)
+
+#If there is an NA in no review, we set to 0
+nyc$reviews_per_month <- ifelse(is.na(nyc$reviews_per_month == TRUE), 0, nyc$reviews_per_month)
+summary(nyc)
+
+#average price per neighborhood_group
+library(dplyr)
+str(nyc)
+nyc %>% group_by(neighbourhood_group)%>% summarize(mean(price))
+nyc %>% group_by(neighbourhood_group)%>% summarize(median(price))
+
+#average and median price by room type
+nyc %>% group_by(room_type)%>% summarize(mean(price))
+nyc %>% group_by(room_type)%>% summarize(median(price))
+
+#average and median price by neighborhood group and room type
+nyc %>% group_by(neighbourhood_group, room_type)%>% summarize(mean(price))
+nyc %>% group_by(neighbourhood_group, room_type)%>% summarize(median(price))
+
+summary(nyc)
+
+nyc$review_category <- ifelse(nyc$number_of_reviews == 0, "Zero", ifelse(nyc$number_of_reviews <= mean(nyc$number_of_reviews), "Below Average", "Above Average"))
+summary(nyc)
+nyc$review_category <- as.factor(nyc$review_category)
+
+#looking at review category and average price
+nyc %>% group_by(review_category)%>% summarize(mean(price)) #0 review then higher price
+nyc %>% group_by(review_category)%>% summarize(mean(minimum_nights))
+nyc %>% group_by(neighbourhood_group)%>% summarize(mean(number_of_reviews))
+
+
+```
+
+```{r}
+#Question 2: Using lat and long to build map based visualization 
+library(ggplot2)
+library(geosphere)
+plot(nyc$longitude, nyc$latitude, pch = 16, cex = .4, main = "pseudo-map of nyc", xaxt = "n", yaxt = "n", xlab = "", ylab = "")
+
+
+
